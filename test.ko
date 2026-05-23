@@ -1,0 +1,3 @@
+assume x = 3;
+assume y = x + 3;
+getback(y);
