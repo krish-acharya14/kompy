@@ -2,20 +2,22 @@
 
 #include <cctype>
 #include <cstdlib>
-#include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
 enum class TokenType {
     // Keywords
-    exit, assume,
+    exit, assume, maybe, otherwise,
 
-    //Identifiers and literals
+    // Identifiers and literals
     identifier, integer,
 
     // Symbols
-    open_paren, close_paren, semicolon,
+    open_paren, close_paren,   // ( )
+    open_brace, close_brace,   // { }
+    semicolon,
 
     // Assignment
     equal,
@@ -30,13 +32,13 @@ enum class TokenType {
     and_and, or_or, not_op
 };
 
-struct Token { 
+struct Token {
     TokenType type;
     std::optional<std::string> value;
 };
 
 class Tokenizer {
-    public: 
+    public:
         inline explicit Tokenizer(std::string src) : m_src(std::move(src)), m_index(0) {}
 
         inline std::vector<Token> tokenize() {
@@ -45,147 +47,123 @@ class Tokenizer {
             while (peek().has_value()) {
                 if (std::isalpha(peek().value())) {
                     buf.push_back(consume());
-                    while (peek().has_value() && (std::isalnum(peek().value()))) 
+                    while (peek().has_value() && std::isalnum(peek().value())) 
                         buf.push_back(consume());
                     
                     if (buf == "getback") tokens.push_back({ .type = TokenType::exit });
                     else if (buf == "assume") tokens.push_back({ .type = TokenType::assume });
+                    else if (buf == "maybe") tokens.push_back({ .type = TokenType::maybe });
+                    else if (buf == "otherwise") tokens.push_back({ .type = TokenType::otherwise });
                     else tokens.push_back({ .type = TokenType::identifier, .value = buf });
                     buf.clear();
                     continue;
                 }
+
                 else if (std::isdigit(peek().value())) {
                     buf.push_back(consume());
                     while (peek().has_value() && std::isdigit(peek().value()))
                         buf.push_back(consume());
-                    
                     tokens.push_back({ .type = TokenType::integer, .value = buf });
                     buf.clear();
                     continue;
                 }
-                else if (peek().value() == '(') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::open_paren });
-                    continue;
-                }
-                else if (peek().value() == ')'){
-                    consume();
-                    tokens.push_back({ .type = TokenType::close_paren });
-                    continue;
-                }
-                else if (peek().value() == ';') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::semicolon });
-                    continue;
-                }
 
-                else if (peek().value() == '+') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::plus });
-                    continue;
-                }
-                else if (peek().value() == '-') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::minus});
-                    continue;
-                }
-                else if (peek().value() == '*') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::star});
-                    continue;
-                }
-                else if (peek().value() == '/') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::slash});
-                    continue;
-                }
-                else if (peek().value() == '%') {
-                    consume();
-                    tokens.push_back({ .type = TokenType::percent});
-                    continue;
-                }
-
-                else if (peek().value() == '=') {
-                    consume();
-                    if (peek().has_value() && peek().value() == '=') {
-                        consume();
-                        tokens.push_back({ .type = TokenType::equal_equal });
-                    }
-                    else tokens.push_back({ .type = TokenType::equal });
-                    continue;
-                }
-                else if (peek().value() == '!') {
-                    consume();
-                    if (peek().has_value() && peek().value() == '=') {
-                        consume();
-                        tokens.push_back({ .type = TokenType::not_equal });
-                    }
-                    else tokens.push_back({ .type = TokenType::not_op });
-                    continue;
-                }
-                else if (peek().value() == '<') {
-                    consume();
-                    if (peek().has_value() && peek().value() == '=') {
-                        consume();
-                        tokens.push_back({ .type = TokenType::less_equal });
-                    }
-                    else tokens.push_back({ .type = TokenType::less });
-                    continue;
-                }
-                else if (peek().value() == '>') {
-                    consume();
-                    if (peek().has_value() && peek().value() == '=') {
-                        consume();
-                        tokens.push_back({ .type = TokenType::greater_equal });
-                    }
-                    else tokens.push_back({ .type = TokenType::greater });
-                    continue;
-                }
-
-                else if (peek().value() == '&') {
-                    consume();
-                    if (peek().has_value() && peek().value() == '&') {
-                        consume();
-                        tokens.push_back({ .type = TokenType::and_and });
-                    }
-                    else {
-                        std::cerr << "Unexpected character &" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
-                    continue;
-                }
-                else if (peek().value() == '|') {
-                    consume();
-                    if (peek().has_value() && peek().value() == '|') {
-                        consume();
-                        tokens.push_back({ .type = TokenType::or_or });
-                    }
-                    else {
-                        std::cerr << "Unexpected character |" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
-                    continue;
-                }
-                
                 else if (std::isspace(peek().value())) {
                     consume();
                     continue;
                 }
+
+                else if (peek().has_value()) {
+                    switch (peek().value()) {
+                        case '(': tokens.push_back({ .type = TokenType::open_paren }); consume(); break;
+                        case ')': tokens.push_back({ .type = TokenType::close_paren }); consume(); break;
+                        case '{': tokens.push_back({ .type = TokenType::open_brace }); consume(); break;
+                        case '}': tokens.push_back({ .type = TokenType::close_brace }); consume(); break;
+                        case ';': tokens.push_back({ .type = TokenType::semicolon }); consume(); break;
+                        case '=': 
+                            consume();
+                            if (peek().has_value() && peek().value() == '=') {
+                                tokens.push_back({ .type = TokenType::equal_equal });
+                                consume();
+                            } else {
+                                tokens.push_back({ .type = TokenType::equal });
+                            }
+                            break;
+                        case '+': tokens.push_back({ .type = TokenType::plus }); consume(); break;
+                        case '-': tokens.push_back({ .type = TokenType::minus }); consume(); break;
+                        case '*': tokens.push_back({ .type = TokenType::star }); consume(); break;
+                        case '/': tokens.push_back({ .type = TokenType::slash }); consume(); break;
+                        case '%': tokens.push_back({ .type = TokenType::percent }); consume(); break;
+                        case '!':
+                            consume();
+                            if (peek().has_value() && peek().value() == '=') {
+                                tokens.push_back({ .type = TokenType::not_equal });
+                                consume();
+                            } else {
+                                std::cerr << "Unexpected token: !" << std::endl;
+                                exit(EXIT_FAILURE);
+                            }
+                            break;
+                        case '<':
+                            consume();
+                            if (peek().has_value() && peek().value() == '=') {
+                                tokens.push_back({ .type = TokenType::less_equal });
+                                consume();
+                            } else {
+                                tokens.push_back({ .type = TokenType::less });
+                            }
+                            break;
+                        case '>':
+                            consume();
+                            if (peek().has_value() && peek().value() == '=') {
+                                tokens.push_back({ .type = TokenType::greater_equal });
+                                consume();
+                            } else {
+                                tokens.push_back({ .type = TokenType::greater });
+                            }
+                            break;
+                        case '&':
+                            consume();
+                            if (peek().has_value() && peek().value() == '&') {
+                                tokens.push_back({ .type = TokenType::and_and });
+                                consume();
+                            } else {
+                                std::cerr << "Unexpected token: &" << std::endl;
+                                exit(EXIT_FAILURE);
+                            }
+                            break;
+                        case '|':
+                            consume();
+                            if (peek().has_value() && peek().value() == '|') {
+                                tokens.push_back({ .type = TokenType::or_or });
+                                consume();
+                            } else {
+                                std::cerr << "Unexpected token: |" << std::endl;
+                                exit(EXIT_FAILURE);
+                            }
+                            break;
+                    }
+                }
+
                 else {
-                    std::cerr << "Unexpected character " << peek().value() << std::endl;
+                    std::cerr << "Unexpected character: " << peek().value() << std::endl;
                     exit(EXIT_FAILURE);
                 }
             }
             m_index = 0;
             return tokens;
-        }
+        } 
+
     private:
-        [[nodiscard]] inline std::optional<char> peek(int offset = 0) const {
-            if (m_index + offset >= m_src.size()) return {};
-            return m_src.at(m_index + offset);
+        [[nodiscard]] inline std::optional<char> peek(size_t offset = 0) const {
+            if (m_index + offset >= m_src.size())
+                return {};
+            return m_src[m_index + offset];
         }
+
         inline char consume() { return m_src.at(m_index++); }
 
         std::string m_src;
-        std::size_t m_index;
+        size_t m_index;
+
 };

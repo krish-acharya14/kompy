@@ -1,3 +1,16 @@
-assume x = 3;
-assume y = x + 3;
-getback(y);
+assume x = 1;
+assume y = 0;
+
+maybe (x) {
+    maybe (y) {
+        getback(1);
+    }
+
+    otherwise {
+        getback(2);
+    }
+}
+
+otherwise {
+    getback(3);
+}

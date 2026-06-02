@@ -1,12 +1,15 @@
 #pragma once
 
 #include "parser.hpp"
-#include <string>
+#include <sstream>
 #include <unordered_map>
+#include <vector>
 
 class Generator {
     public:
         inline explicit Generator(NodeProg prog) : m_prog(std::move(prog)) {}
+
+        // Expression codegen
 
         void gen_expr(const NodeExpr& expr) {
             struct ExprVisitor {
@@ -16,19 +19,22 @@ class Generator {
                     gen->m_output << "    mov rax, " << e.integer.value.value() << "\n";
                     gen->push("rax");
                 }
-
                 void operator()(const NodeIdentifier& e) const {
-                    auto it = gen->m_vars.find(e.identifier.value.value());
-                    if (it == gen->m_vars.end()) {
-                        std::cerr << "Undefined variable: " << e.identifier.value.value() << std::endl;
-                        exit(EXIT_FAILURE);
+                    const std::string& name = e.identifier.value.value();
+                    for (int i = (int)gen->m_scopes.size() - 1; i >= 0; --i) {
+                        auto it = gen->m_scopes[i].find(name);
+                        if (it != gen->m_scopes[i].end()) {
+                            std::stringstream ss;
+                            ss << "QWORD [rsp + " << (gen->m_stack_size - it->second.stack_loc - 1) * 8 << "]";
+                            gen->push(ss.str());
+                            return;
+                        }
                     }
-                    std::stringstream offset;
-                    offset << "QWORD [rsp + " << (gen->m_stack_size - it->second.stack_loc - 1) * 8 << "]";
-                    gen->push(offset.str());
+                    std::cerr << "Undefined variable: " << name << std::endl;
+                    exit(EXIT_FAILURE);
                 }
 
-                void operator()(const NodeUnaryExpr& e) const {
+                void operator()(const NodeUnary& e) const {
                     gen->gen_expr(*e.operand);
                     gen->pop("rax");
                     switch (e.op) {
@@ -38,19 +44,18 @@ class Generator {
                             gen->m_output << "    movzx rax, al\n";
                             break;
                         case UnaryOp::Neg:
-                            gen->m_output <<"    neg rax\n";
+                            gen->m_output << "    neg rax\n";
                             break;
                     }
                     gen->push("rax");
                 }
 
-                void operator()(const NodeBinExpr& e) const {
+                void operator()(const NodeBinary& e) const {
                     gen->gen_expr(*e.left);
                     gen->gen_expr(*e.right);
-                    gen->pop("rbx");          //right operand
-                    gen->pop("rax");          //left operand
+                    gen->pop("rbx");
+                    gen->pop("rax");
                     switch (e.op) {
-                        // Arithmetic
                         case BinOp::Add:
                             gen->m_output << "    add rax, rbx\n";
                             break;
@@ -58,7 +63,7 @@ class Generator {
                             gen->m_output << "    sub rax, rbx\n";
                             break;
                         case BinOp::Mul:
-                            gen->m_output << "     imul rax, rbx\n";
+                            gen->m_output << "    imul rax, rbx\n";
                             break;
                         case BinOp::Div:
                             gen->m_output << "    cqo\n";
@@ -69,8 +74,6 @@ class Generator {
                             gen->m_output << "    idiv rbx\n";
                             gen->m_output << "    mov rax, rdx\n";
                             break;
-
-                        // Comparison
                         case BinOp::Eq:
                             gen->m_output << "    cmp rax, rbx\n";
                             gen->m_output << "    sete al\n";
@@ -101,82 +104,138 @@ class Generator {
                             gen->m_output << "    setge al\n";
                             gen->m_output << "    movzx rax, al\n";
                             break;
-
-                        // Logic
                         case BinOp::And:
                             gen->m_output << "    test rax, rax\n";
-                            gen->m_output << "    setne al\n";
+                            gen->m_output << "    sete al\n";
                             gen->m_output << "    test rbx, rbx\n";
-                            gen->m_output << "    setne bl\n";
+                            gen->m_output << "    sete bl\n";
                             gen->m_output << "    and al, bl\n";
                             gen->m_output << "    movzx rax, al\n";
                             break;
                         case BinOp::Or:
                             gen->m_output << "    test rax, rax\n";
-                            gen->m_output << "    setne al\n";
+                            gen->m_output << "    sete al\n";
                             gen->m_output << "    test rbx, rbx\n";
-                            gen->m_output << "    setne bl\n";
+                            gen->m_output << "    sete bl\n";
                             gen->m_output << "    or al, bl\n";
                             gen->m_output << "    movzx rax, al\n";
                             break;
                     }
-                    gen->push("rax");   
+                    gen->push("rax");
                 }
             };
             std::visit(ExprVisitor{ .gen = this }, expr.var);
         }
 
+        size_t begin_scope() {
+            m_scopes.push_back({});
+            return m_scopes.size() - 1;
+        }
+
+        void end_scope(size_t stack_size_before) {
+            size_t vars_in_scope = m_stack_size - stack_size_before;
+            if (vars_in_scope > 0) {
+                m_output << "    add rsp, " << vars_in_scope * 8 << "\n";
+                m_stack_size -= vars_in_scope;
+            }
+            m_scopes.pop_back();
+        }
+
+        void declare_var(const std::string& name) {
+            if (m_scopes.back().count(name)) {
+                std::cerr << "Variable already declared in this scope: " << name << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            m_scopes.back().insert({ name, Var{ .stack_loc = m_stack_size - 1 } });
+        }
+
         void gen_stmt(const NodeStmt& stmt) {
-        struct StmtVisitor {
-            Generator* gen;
+            struct StmtVisitor {
+                Generator* gen;
 
-            void operator()(const NodeAssume& s) const {
-                if (gen->m_vars.count(s.identifier.value.value())) {
-                    std::cerr << "Identifier already used: " << s.identifier.value.value() << std::endl;
-                    exit(EXIT_FAILURE);
+                void operator()(const NodeExit& s) const {
+                    gen->gen_expr(s.expr);
+                    gen->m_output << "    mov rax, 60\n";
+                    gen->pop("rdi");
+                    gen->m_output << "    syscall\n";
                 }
-                gen->m_vars.insert({ s.identifier.value.value(), Var{ .stack_loc = gen->m_stack_size } });
-                gen->gen_expr(s.expr);
-            }
 
-            void operator()(const NodeExit& s) const {
-                gen->gen_expr(s.expr);
-                gen->m_output << "    mov rax, 60\n";
-                gen->pop("rdi");
-                gen->m_output << "    syscall\n";
-            }
-        };
+                void operator()(const NodeAssume& s) const {
+                    gen->gen_expr(s.expr);
+                    gen->declare_var(s.identifier.value.value());
+                }
 
-        std::visit(StmtVisitor{ .gen = this }, stmt.var);
-    }
+                void operator()(const NodeBlock& s) const {
+                    size_t saved = gen->begin_scope();
+                    for (const auto& stmt_ptr : s.stmts) 
+                        gen->gen_stmt(*stmt_ptr);
+                    gen->end_scope(saved);
+                }
+
+                void operator()(const NodeMaybe& s) const {
+                    size_t lbl = gen->m_label_count++;
+
+                    gen->gen_expr(s.condn);
+                    gen->pop("rax");
+                    gen->m_output << "    test rax, rax\n";
+                    if (s.else_block.has_value()) {
+                        gen->m_output << "    jz .else_" << lbl << "\n";
+
+                        size_t saved_then = gen->begin_scope();
+                        for (const auto& stmt_ptr : s.then_block.stmts)
+                            gen->gen_stmt(*stmt_ptr);
+                        
+                        gen->end_scope(saved_then);
+                        gen->m_output << "    jmp .end_" << lbl << "\n";
+
+                        gen->m_output << ".else_" << lbl << ":\n";
+                        gen->gen_stmt(*s.else_block.value());
+                    } else {
+                        gen->m_output << "    jz .end_" << lbl << "\n";
+
+                        size_t saved = gen->begin_scope();
+                        for (const auto& stmt_ptr : s.then_block.stmts)
+                            gen->gen_stmt(*stmt_ptr);
+                        gen->end_scope(saved);
+                    }
+                    gen->m_output << ".end_" << lbl << ":\n";
+                }
+
+            };
+            std::visit(StmtVisitor{ .gen = this }, stmt.var);
+        }
 
         [[nodiscard]] std::string gen_prog() {
             m_output << "global _start\n";
             m_output << "section .text\n";
             m_output << "_start:\n";
+
+            begin_scope();
             for (const NodeStmt& stmt : m_prog.stmts) 
                 gen_stmt(stmt);
             
             m_output << "    mov rax, 60\n";
-            m_output << "    mov rdi, 0\n";
+            m_output << "    xor rdi, rdi\n";
             m_output << "    syscall\n";
             return m_output.str();
         }
-
+    
     private:
-        void push(const std::string& reg) {
-            m_output << "    push " << reg << "\n";
+        void push(const std::string& src) {
+            m_output << "    push " << src << "\n";
             m_stack_size++;
         }
-        void pop(const std::string& reg) {
-            m_output << "    pop " << reg << "\n";
+        void pop(const std::string& dst) {
+            m_output << "    pop " << dst << "\n";
             m_stack_size--;
         }
 
         struct Var { size_t stack_loc; };
 
+        std::vector<std::unordered_map<std::string, Var>> m_scopes;
+
         const NodeProg m_prog;
-        std::unordered_map<std::string, Var> m_vars;
         std::stringstream m_output;
         size_t m_stack_size = 0;
+        size_t m_label_count = 0;
 };
