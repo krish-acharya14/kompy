@@ -1,16 +1,5 @@
-assume x = 1;
-assume y = 0;
-
-maybe (x) {
-    maybe (y) {
-        getback(1);
-    }
-
-    otherwise {
-        getback(2);
-    }
+assume i = 0;
+while (i < 5) {
+    i = i + 1;
 }
-
-otherwise {
-    getback(3);
-}
+getback(i);

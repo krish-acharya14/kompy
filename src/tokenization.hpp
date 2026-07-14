@@ -9,7 +9,7 @@
 
 enum class TokenType {
     // Keywords
-    exit, assume, maybe, otherwise,
+    exit, assume, maybe, otherwise, while_loop,
 
     // Identifiers and literals
     identifier, integer,
@@ -54,6 +54,7 @@ class Tokenizer {
                     else if (buf == "assume") tokens.push_back({ .type = TokenType::assume });
                     else if (buf == "maybe") tokens.push_back({ .type = TokenType::maybe });
                     else if (buf == "otherwise") tokens.push_back({ .type = TokenType::otherwise });
+                    else if (buf == "while") tokens.push_back({ .type = TokenType::while_loop });
                     else tokens.push_back({ .type = TokenType::identifier, .value = buf });
                     buf.clear();
                     continue;

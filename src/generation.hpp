@@ -129,7 +129,7 @@ class Generator {
 
         size_t begin_scope() {
             m_scopes.push_back({});
-            return m_scopes.size() - 1;
+            return m_stack_size;
         }
 
         void end_scope(size_t stack_size_before) {
@@ -163,6 +163,29 @@ class Generator {
                 void operator()(const NodeAssume& s) const {
                     gen->gen_expr(s.expr);
                     gen->declare_var(s.identifier.value.value());
+                }
+
+                void operator()(const NodeAssign& s) const {
+                    gen->gen_expr(s.expr);
+
+                    gen->pop("rax");
+
+                    for (int i = (int)gen->m_scopes.size() - 1; i >= 0; --i) {
+                        auto it = gen->m_scopes[i].find(s.identifier.value.value());
+
+                        if (it != gen->m_scopes[i].end()) {
+
+                            gen->m_output << "    mov QWORD [rsp + " << (gen->m_stack_size - it->second.stack_loc - 1) * 8 << "], rax\n";
+
+                            return;
+                        }
+                    }
+
+                    std::cerr << "Undefined variable: "
+                            << s.identifier.value.value()
+                            << std::endl;
+
+                    exit(EXIT_FAILURE);
                 }
 
                 void operator()(const NodeBlock& s) const {
@@ -199,6 +222,24 @@ class Generator {
                         gen->end_scope(saved);
                     }
                     gen->m_output << ".end_" << lbl << ":\n";
+                }
+
+                void operator()(const NodeWhile& s) const {
+                    size_t lbl = gen->m_label_count++;
+
+                    gen->m_output << ".loop_start_" << lbl << ":\n";
+                    gen->gen_expr(s.condn);
+                    gen->pop("rax");
+                    gen->m_output << "    test rax, rax\n";
+                    gen->m_output << "    jz .loop_end_" << lbl << "\n";
+
+                    size_t saved = gen->begin_scope();
+                    for (const auto& stmt_ptr : s.body.stmts)
+                        gen->gen_stmt(*stmt_ptr);
+                    gen->end_scope(saved);
+
+                    gen->m_output << "    jmp .loop_start_" << lbl << "\n";
+                    gen->m_output << ".loop_end_" << lbl << ":\n";
                 }
 
             };

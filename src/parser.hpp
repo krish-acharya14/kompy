@@ -50,6 +50,11 @@ struct NodeAssume {
     NodeExpr expr;
 };
 
+struct NodeAssign {
+    Token identifier;
+    NodeExpr expr;
+};
+
 struct NodeBlock {
     std::vector<std::shared_ptr<NodeStmt>> stmts;
 };
@@ -60,8 +65,13 @@ struct NodeMaybe {
     std::optional<std::shared_ptr<NodeStmt>> else_block;
 };
 
+struct NodeWhile {
+    NodeExpr condn;
+    NodeBlock body;
+};
+
 struct NodeStmt {
-    std::variant<NodeExit, NodeAssume, NodeMaybe, NodeBlock> var;
+    std::variant<NodeExit, NodeAssume, NodeAssign, NodeMaybe, NodeBlock, NodeWhile> var;
 };
 
 struct NodeProg {
@@ -254,6 +264,31 @@ class Parser {
                         return NodeStmt{ .var = stmt_assume };
                 }
 
+                // identifier = expr;
+                if (peek().has_value() && peek().value().type == TokenType::identifier && peek(1).has_value() && peek(1).value().type == TokenType::equal) {
+                    NodeAssign stmt;
+
+                    stmt.identifier = consume();
+                    consume();
+
+                    auto expr = parse_expr();
+
+                    if (!expr) {
+                        std::cerr << "Expected expression after '='" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
+                    stmt.expr = expr.value();
+
+                    if (!peek().has_value() || peek().value().type != TokenType::semicolon) {
+                        std::cerr << "Expected ';' after assignment" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    return NodeStmt{ .var = stmt };
+                }
+
                 // {Block}
                 if (peek().has_value() && peek().value().type == TokenType::open_brace) {
                     return NodeStmt{ .var = parse_block() };
@@ -299,6 +334,34 @@ class Parser {
                         }
                     }
                     return NodeStmt{ .var = node_maybe };
+                }
+
+                // while (condn) { ... }
+                if (peek().has_value() && peek().value().type == TokenType::while_loop) {
+                    consume();
+
+                    if (!peek().has_value() || peek().value().type != TokenType::open_paren) {
+                        std::cerr << "Expected '(' after 'while'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    auto condn = parse_expr();
+                    if (!condn) {
+                        std::cerr << "Expected condition expression in 'while'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
+                    if (!peek().has_value() || peek().value().type != TokenType::close_paren) {
+                        std::cerr << "Expected ')' after condition in 'while'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    NodeWhile node_while;
+                    node_while.condn = condn.value();
+                    node_while.body = parse_block();
+                    return NodeStmt{ .var = node_while };
                 }
                 return {};
             }
