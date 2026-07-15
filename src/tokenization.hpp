@@ -9,7 +9,7 @@
 
 enum class TokenType {
     // Keywords
-    exit, assume, maybe, otherwise, while_loop,
+    exit, assume, maybe, otherwise, while_loop, fn, ret,
 
     // Identifiers and literals
     identifier, integer,
@@ -17,7 +17,7 @@ enum class TokenType {
     // Symbols
     open_paren, close_paren,   // ( )
     open_brace, close_brace,   // { }
-    semicolon,
+    semicolon, comma,
 
     // Assignment
     equal,
@@ -47,14 +47,16 @@ class Tokenizer {
             while (peek().has_value()) {
                 if (std::isalpha(peek().value())) {
                     buf.push_back(consume());
-                    while (peek().has_value() && std::isalnum(peek().value())) 
+                    while (peek().has_value() && (std::isalnum(peek().value()) || peek().value() == '_'))
                         buf.push_back(consume());
-                    
+
                     if (buf == "getback") tokens.push_back({ .type = TokenType::exit });
                     else if (buf == "assume") tokens.push_back({ .type = TokenType::assume });
                     else if (buf == "maybe") tokens.push_back({ .type = TokenType::maybe });
                     else if (buf == "otherwise") tokens.push_back({ .type = TokenType::otherwise });
                     else if (buf == "while") tokens.push_back({ .type = TokenType::while_loop });
+                    else if (buf == "fn") tokens.push_back({ .type = TokenType::fn });
+                    else if (buf == "return") tokens.push_back({ .type = TokenType::ret });
                     else tokens.push_back({ .type = TokenType::identifier, .value = buf });
                     buf.clear();
                     continue;
@@ -81,7 +83,8 @@ class Tokenizer {
                         case '{': tokens.push_back({ .type = TokenType::open_brace }); consume(); break;
                         case '}': tokens.push_back({ .type = TokenType::close_brace }); consume(); break;
                         case ';': tokens.push_back({ .type = TokenType::semicolon }); consume(); break;
-                        case '=': 
+                        case ',': tokens.push_back({ .type = TokenType::comma }); consume(); break;
+                        case '=':
                             consume();
                             if (peek().has_value() && peek().value() == '=') {
                                 tokens.push_back({ .type = TokenType::equal_equal });
@@ -101,8 +104,7 @@ class Tokenizer {
                                 tokens.push_back({ .type = TokenType::not_equal });
                                 consume();
                             } else {
-                                std::cerr << "Unexpected token: !" << std::endl;
-                                exit(EXIT_FAILURE);
+                                tokens.push_back({ .type = TokenType::not_op });
                             }
                             break;
                         case '<':
@@ -143,6 +145,9 @@ class Tokenizer {
                                 exit(EXIT_FAILURE);
                             }
                             break;
+                        default:
+                            std::cerr << "Unexpected character: " << peek().value() << std::endl;
+                            exit(EXIT_FAILURE);
                     }
                 }
 

@@ -39,7 +39,9 @@ int main(int argc, char* argv[]) {
     }
 
     system("nasm -felf64 out.asm");
-    system("ld -o out out.o");
+    if (system("ld -o out out.o 2>/dev/null") != 0) {
+        system("x86_64-linux-gnu-ld -o out out.o");
+    }
 
     return EXIT_SUCCESS;
     

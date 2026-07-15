@@ -37,8 +37,13 @@ struct NodeUnary {
     std::shared_ptr<NodeExpr> operand;
 };
 
+struct NodeCall {
+    Token identifier;
+    std::vector<std::shared_ptr<NodeExpr>> args;
+};
+
 struct NodeExpr {
-    std::variant<NodeInteger, NodeIdentifier, NodeBinary, NodeUnary> var;
+    std::variant<NodeInteger, NodeIdentifier, NodeBinary, NodeUnary, NodeCall> var;
 };
 
 struct NodeExit {
@@ -70,12 +75,27 @@ struct NodeWhile {
     NodeBlock body;
 };
 
+struct NodeReturn {
+    NodeExpr expr;
+};
+
+struct NodeCallStmt {
+    NodeCall call;
+};
+
 struct NodeStmt {
-    std::variant<NodeExit, NodeAssume, NodeAssign, NodeMaybe, NodeBlock, NodeWhile> var;
+    std::variant<NodeExit, NodeAssume, NodeAssign, NodeMaybe, NodeBlock, NodeWhile, NodeReturn, NodeCallStmt> var;
+};
+
+struct NodeFunction {
+    Token name;
+    std::vector<Token> params;
+    NodeBlock body;
 };
 
 struct NodeProg {
     std::vector<NodeStmt> stmts;
+    std::vector<NodeFunction> functions;
 };
 
 class Parser {
@@ -116,6 +136,46 @@ class Parser {
                     std::cerr << "Internal error: not a binary operator" << std::endl;
                     exit(EXIT_FAILURE);
             }
+        }
+
+        // function call parsing
+        NodeCall parse_call(Token ident_tok) {
+            if (!peek().has_value() || peek().value().type != TokenType::open_paren) {
+                std::cerr << "Expected '(' in fuction call to '" << ident_tok.value.value_or("?") << "'" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            consume();
+
+            NodeCall call;
+            call.identifier = ident_tok;
+
+            if (peek().has_value() && peek().value().type == TokenType::close_paren) {
+                consume();
+                return call;
+            }
+
+            while (true) {
+                auto arg = parse_expr();
+                if (!arg) {
+                    std::cerr << "Expected argument expression in call to '" << ident_tok.value.value_or("?") << "'" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                call.args.push_back(std::make_shared<NodeExpr>(arg.value()));
+
+                if (peek().has_value() && peek().value().type == TokenType::comma) {
+                    consume();
+                    continue;
+                }
+                break;
+            }
+
+            if (!peek().has_value() || peek().value().type != TokenType::close_paren) {
+                std::cerr << "Expected ')' after arguments call in call to '" << ident_tok.value.value_or("?") << "'" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            consume();
+
+            return call;
         }
 
         std::optional<NodeExpr> parse_primary() {
@@ -161,9 +221,15 @@ class Parser {
                 return NodeExpr{ .var = NodeInteger{ .integer = consume() }};
             }
 
-            // Identifier 
+            // Identifier or Function call
             if (peek().has_value() && peek().value().type == TokenType::identifier) {
-                return NodeExpr{ .var = NodeIdentifier{ .identifier = consume() }};
+                Token ident_tok = consume();
+
+                if (peek().has_value() && peek().value().type == TokenType::open_paren) {
+                    NodeCall call = parse_call(ident_tok);
+                    return NodeExpr{ .var = call };
+                }
+                return NodeExpr{ .var = NodeIdentifier{ .identifier = ident_tok }};
             }
 
             return {};
@@ -242,6 +308,37 @@ class Parser {
                     consume();
                     return NodeStmt{ .var = NodeExit{ .expr = expr.value()}};
                 }
+
+                // return(expr);
+                if (peek().has_value() && peek().value().type == TokenType::ret) {
+                    consume();
+                    // consume();
+                    if (!peek().has_value() || peek().value().type != TokenType::open_paren) {
+                        std::cerr << "Expected '(' after 'return'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    auto expr = parse_expr();
+                    if (!expr) {
+                        std::cerr << "Expected expression inside return()" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
+                    if (!peek().has_value() || peek().value().type != TokenType::close_paren) {
+                        std::cerr << "Expected ')' after expression in return()" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    if (!peek().has_value() || peek().value().type != TokenType::semicolon) {
+                        std::cerr << "Expected ';' after return()" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    return NodeStmt{ .var = NodeReturn{ .expr = expr.value() }};
+                }
             
                 // assume x = expr;
                 if (peek().has_value() && peek().value().type == TokenType::assume
@@ -287,6 +384,21 @@ class Parser {
                     consume();
 
                     return NodeStmt{ .var = stmt };
+                }
+
+                // identifier(args);
+                if (peek().has_value() && peek().value().type == TokenType::identifier 
+                    && peek(1).has_value() && peek(1).value().type == TokenType::open_paren) {
+                        Token ident_tok = consume();
+                        NodeCall call = parse_call(ident_tok);
+
+                        if (!peek().has_value() || peek().value().type != TokenType::semicolon) {
+                            std::cerr << "Expected ';' after call to '" << ident_tok.value.value_or("?") << "'" << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
+                        consume();
+
+                        return NodeStmt{ .var = NodeCallStmt{ .call = call }};
                 }
 
                 // {Block}
@@ -366,18 +478,71 @@ class Parser {
                 return {};
             }
 
+            // fn name(p1, p2, ...) {...}
+            NodeFunction parse_function() {
+                consume();
+
+                if (!peek().has_value() || peek().value().type != TokenType::identifier) {
+                    std::cerr << "Expected function name after 'fn'" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                NodeFunction fn;
+                fn.name = consume();
+
+                if (!peek().has_value() || peek().value().type != TokenType::open_paren) {
+                    std::cerr << "Expected '(' after function name '" << fn.name.value.value_or("?") << "'" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                consume();
+
+                // Param list
+                if (peek().has_value() && peek().value().type != TokenType::close_paren) {
+                    while (true) {
+                        if (!peek().has_value() || peek().value().type != TokenType::identifier) {
+                            std::cerr << "Expected parameter name in function '" << fn.name.value.value_or("?") << "'" << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
+                        fn.params.push_back(consume());
+                        if (peek().has_value() && peek().value().type == TokenType::comma) {
+                            consume();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+
+                if (!peek().has_value() || peek().value().type != TokenType::close_paren) {
+                    std::cerr << "Expecte ')' after parameter list in function '" << fn.name.value.value_or("?") << "'" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+                consume();
+
+                fn.body = parse_block();
+                return fn;
+            }
+
             std::optional<NodeProg> parse_prog() {
                 NodeProg prog;
-                while(peek().has_value()) {
+                while (peek().has_value()) {
+                        if (peek()->type == TokenType::fn) {
+                        prog.functions.push_back(parse_function());
+                        continue;
+                    }
+
                     auto stmt = parse_stmt();
                     if (!stmt) {
-                        std::cerr << "Unexpected token '" << peek().value().value.value_or("?") << "'" << std::endl;
+                        if (peek().has_value()) {
+                            std::cerr << "Unexpected token '" << peek()->value.value_or("?") << "'" << std::endl;
+                        } else {
+                            std::cerr << "Unexpected end of file" << std::endl;
+                        }
                         exit(EXIT_FAILURE);
                     }
+
                     prog.stmts.push_back(stmt.value());
                 }
                 return prog;
-            }
+            }   
     
     private:
         [[nodiscard]] std::optional<Token> peek(size_t offset = 0) const {
