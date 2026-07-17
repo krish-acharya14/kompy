@@ -214,13 +214,13 @@ Kompy has four core components, each a distinct class or translation unit, invok
 flowchart LR
     A[.ko Source File] --> B[Tokenizer]
     B --> C[Parser]
-    C --> D[AST NodeProg]
+    C --> D[AST — NodeProg]
     D --> E[Generator]
-    E --> F[out.asm (NASM x86-64)]
+    E --> F[out.asm — NASM x86-64]
     F --> G[nasm]
     G --> H[out.o]
     H --> I[ld]
-    I --> J[out (ELF executable)]
+    I --> J[out — ELF executable]
 ```
 
 - **Tokenizer** (`tokenization.hpp`) - hand-written character scanner producing a flat token stream.
